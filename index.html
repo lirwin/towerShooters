@@ -1,0 +1,291 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Tower Shooters</title>
+    <link rel="stylesheet" href="css/style.css">
+  </head>
+  <body>
+ 
+    <canvas id="canvas" width="840" height="800"></canvas>
+    <script src="js/utils.js"></script>
+    <script src="classes/gamePieces.js"></script>
+    <script>
+	"use strict";
+	
+    window.onload = function () {
+        var canvas = document.getElementById( 'canvas' );
+        var context = canvas.getContext( '2d' );
+        var colWidth = ( canvas.width / 4 ) || 0;         
+        var galleryStart = colWidth;
+        var galleryWidth = 2 * colWidth;
+        
+        var towers = [];
+        var numTowers = 4;
+        var towerBaseSize = 120;
+        var towerGunWidth = 40;
+        var towerGunHeight = 100;
+        
+        var enemies = [];
+        var enemySize = 50;
+        var enemySpeed = 5;
+        var enemySpawnDelayMs = 275;
+        var canSpawnEnemies = true;
+        
+        var bullets = [];
+        var bulletSize = 20;
+        var bulletSpeed = 10;
+        var bulletForce = -0.07;
+        var bulletFireDelayMs = 275;
+
+        var particles = [];
+        var particleSize = 8;
+        var minParticleSpeed = 4;
+        var maxParticleSpeed = 12;
+        var numParticlesPerEnemy = 50;
+
+        function drawElements( elements ) {
+            var i, len;
+            
+            for ( i = 0, len = elements.length; i < len; i++ ){
+                elements[ i ].draw( context );
+            }
+        } 
+        
+        function createExplosion(enemy) {
+            for (var i = 0; i < numParticlesPerEnemy; ++i) {
+            
+                var randomAngle = Math.random() * 2 * Math.PI;
+                var speed = utils.getRandomInt( minParticleSpeed, maxParticleSpeed );
+                        
+                var particle = new Ball ({
+                    x: enemy.x,
+                    y: enemy.y, 
+                    xVel: Math.cos(randomAngle) * speed,
+                    yVel: Math.sin(randomAngle) * speed, 
+                    radius: particleSize / 2, 
+                    lineWidth: 1,
+                    color: "yellow"
+                    });
+                particles.push(particle);
+            }
+        }
+
+        function updateParticles() {
+            for (var i = particles.length - 1; i >= 0; --i) {
+                particles[i].updatePhysics();
+                
+                // add some acceleration from gravity each frame.
+                particles[i].yVel += 0.5;
+            
+                // remove bullets that have disappeared off the screen
+                if ( ! utils.containsPoint( { x: 0, y: 0, width: canvas.width, height: canvas.height }, particles[ i ].x, particles[ i ].y ) ) {
+                    particles.splice( i, 1 );
+                }
+            }
+        }
+             
+        function updateTowers(){
+            var i, len;
+            var bullet;
+            var enemyTrig;
+            var bulletStartHypot;
+            
+            function setTimeoutHelper( tower ) {
+                window.setTimeout( function() {
+                     tower.canFire = true; 
+                }, bulletFireDelayMs );
+            } 
+            /**
+             * @param {Object} tower
+             * @return {Object} New object with properties angle, xVel, and yVel
+             */
+            function getEnemyTrig( tower ){
+                var i, len;
+                var dx = 0;
+                var dy = 0;
+                var currDist = canvas.width;
+                var newDist = 0;
+                var angle, xVel, yVel; 
+                
+                //find closest enemy to tower
+                for ( i = 0, len = enemies.length; i < len; i++ ){ 
+                    if ( enemies[ i ].y < - enemies[ i ].radius ){
+                        continue;
+                    }                  
+                    newDist = utils.getDistance( enemies[ i ], tower );
+                    if ( newDist && ( newDist < currDist ) ){
+                        dx = enemies[ i ].x - tower.x;
+                        dy = enemies[ i ].y - tower.y;
+                        currDist = newDist;
+                    }
+                }
+                //calc angle from tower to closest enemy and legs of right triangle to use as x and y velocity
+                angle =  Math.atan2( dy, dx );
+                xVel = Math.cos( angle );
+                yVel = Math.sin( angle );
+                
+                return { 'angle': angle, 'xVel':xVel, 'yVel': yVel };                
+            }        
+            for ( i = 0, len = towers.length; i < len; i++ ){
+                    // update bullet firing
+                    if ( towers[ i ].canFire && enemies.length ) {
+                        enemyTrig = getEnemyTrig( towers[ i ] );
+                        if ( enemyTrig.angle ){
+                            towers[ i ].updatePhysics( enemyTrig.angle - towers[ i ].defaultRot); //subtract initial rotation from new angle
+                            bullet = new Bullet( 
+                                {
+                                   radius: bulletSize / 2,
+                                   xAcel: enemyTrig.xVel * bulletForce,
+                                   yAcel: enemyTrig.yVel * bulletForce,
+                                   xVel: enemyTrig.xVel * bulletSpeed, 
+                                   yVel: enemyTrig.yVel * bulletSpeed 
+                                });
+                            bulletStartHypot = bullet.radius + towers[ i ].gunHeight;
+                            bullet.y = towers[ i ].y + ( enemyTrig.yVel * bulletStartHypot );
+                            bullet.x = towers[ i ].x + ( enemyTrig.xVel * bulletStartHypot );
+                            bullets.push( bullet );
+        
+                            towers[ i ].canFire = false;
+                            setTimeoutHelper(towers[ i ]);                        }
+                        }                      
+            }              
+        }
+      
+        function updateEnemies(){
+            var x1, x2, 
+                enemy, 
+                i;
+            // spawn new enemies
+            if ( canSpawnEnemies ) {
+                enemy = new Enemy(
+                    {
+                        radius: enemySize / 2,
+                        color: '#0008FC'
+                    });
+                x1 = galleryStart + enemy.radius + enemy.lineWidth;
+                x2 = galleryStart + ( galleryWidth - enemy.radius - enemy.lineWidth );
+                   
+                enemy.x = utils.getRandomInt( x1, x2 );
+                enemy.yVel = utils.getRandomInt( 2, enemySpeed );
+                enemies.push( enemy );
+                canSpawnEnemies = false;
+                window.setTimeout( function() { 
+                    canSpawnEnemies = true; 
+                }, enemySpawnDelayMs );
+            }
+                      
+           for ( i = enemies.length - 1; i >= 0; --i ){
+                enemies[ i ].updatePhysics();
+                enemies[ i ].y = enemies[ i ].y > ( canvas.height + enemies[ i ].getSize() ) ? 0 : enemies[ i ].y;  
+            }       
+        }        
+
+        function updateBullets() {
+            var i, j;            
+            
+            // remove enemy if enemy has no health left, otherwise change color
+            function enemyHit( index, enemy ){
+               /*
+                if ( enemy.health ){
+                   enemy.color = utils.lightenDarkenColor( enemy.color, 90 );
+                } else {
+                   enemies.splice( index, 1 );
+                }
+              */
+               switch ( enemy.health ){
+                    case ( 0 ) :
+                        createExplosion( enemies[ index ] );
+                        enemies.splice( index, 1 );
+                        break;
+                    case ( 1 ) :
+                        enemy.color = '#FF0';
+                        break;
+                    case ( 2 ) :
+                        enemy.color = '#0F0';
+                        break;
+                    default : break;
+               } 
+            }
+            for ( i = bullets.length - 1; i >= 0; --i ) {
+                bullets[ i ].updatePhysics();
+                
+                // remove bullets that have disappeared off the screen
+                if ( ! utils.containsPoint( { x: 0, y: 0, width: canvas.width, height: canvas.height }, bullets[ i ].x, bullets[ i ].y ) ) {
+                    bullets.splice( i, 1 );
+                } else {
+                    // check for bullet collision
+                    // if so, remove bullet
+                    for ( j = enemies.length - 1; j >= 0; --j ){
+                        if ( enemies[ j ].isIntersecting( bullets[ i ] ) ) {
+                            enemies[ j ].health -= 1;
+                            enemyHit( j, enemies[ j ] );
+                            bullets.splice( i, 1 );
+                            break;
+                        }
+                    }                     
+                }
+            }
+        }
+		
+        (function createTowers() {
+           var x;
+           var y = Math.round( canvas.height - towerBaseSize - towerGunHeight / 4 ); 
+           var i;
+           var separation = Math.round( towerBaseSize + towerGunHeight );
+           var tower, rotation;
+           
+           for ( i = 0; i < numTowers; i++ ){
+               tower = new Tower(
+                   {
+                       radius: towerBaseSize / 2, 
+                       gunWidth: towerGunWidth,
+                       gunHeight: towerGunHeight,
+                       color: '#AAA'
+                    });               
+
+               //even numbered tower
+               if ( ( i % 2 ) === 0 ) {
+                   x = (colWidth / 2) || 0;
+                   if ( i !== 0 ) {
+                       y -= separation;   //adjust y only on the even numbers
+                   }
+                   
+               } else {
+                   //odd numbered tower
+                   x = 3 * colWidth + ( ( colWidth / 2 ) || 0 );
+               }
+               if ( y < tower.radius + tower.gunHeight / 2 ) {
+                    return; 
+               }
+               tower.x = x;
+               tower.y = y;
+               tower.rotation = rotation;
+               towers.push( tower );
+           }
+        })();
+		
+        function drawGallery() {
+            context.fillStyle = "green";
+            context.fillRect( 0, 0, canvas.width, canvas.height );
+            context.fillStyle = "#996633";
+            context.fillRect( galleryStart, 0, galleryWidth, canvas.height );            
+        }   
+            			
+      (function drawFrame () {
+        window.requestAnimationFrame( drawFrame, canvas );
+        context.clearRect( 0, 0, canvas.width, canvas.height );
+        drawGallery();
+        updateTowers(); 
+        drawElements( towers );
+		updateEnemies();
+		drawElements( enemies );
+        updateBullets();
+		drawElements( bullets );
+        updateParticles();
+        drawElements( particles );
+       }());
+    };
+    </script>
+   </body>
+</html>
